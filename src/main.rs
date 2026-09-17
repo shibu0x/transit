@@ -5,7 +5,7 @@ mod dropbox;
 mod gdrive;
 
 #[derive(Parser)]
-#[command(name = "forgeq")]
+#[command(name = "transit")]
 #[command(about = "A cli tool to upload any data to any kind of storage from terminal")]
 pub struct Cli {
     #[command(subcommand)]
