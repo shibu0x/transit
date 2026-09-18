@@ -1,8 +1,9 @@
+use anyhow::Ok;
 use clap::Parser;
 
 mod config;
-mod dropbox;
-mod gdrive;
+mod providers;
+mod auth;
 
 #[derive(Parser)]
 #[command(name = "transit")]
@@ -12,7 +13,10 @@ pub struct Cli {
     command: config::Commands
 }
 
-fn main() {
+#[tokio::main]
+pub async fn main() -> anyhow::Result<()>{
     let cli = Cli::parse();
-    config::config(cli);
+    let _ = config::config(cli).await?;
+
+    Ok(())
 }
