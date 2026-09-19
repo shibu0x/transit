@@ -1,11 +1,10 @@
+use anyhow::Ok;
 use serde::Deserialize;
 use serde_json::from_str;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
 };
-
-use crate::auth;
 
 const REDIRECT_URI: &str = "http://127.0.0.1:8080/callback";
 const SCOPE: &str = "https://www.googleapis.com/auth/drive.file";
@@ -21,7 +20,7 @@ struct InstalledCredentials {
     project_id: String,
     auth_uri: String,
     token_uri: String,
-    client_secret : String
+    client_secret: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -33,7 +32,7 @@ struct TokenResponse {
     token_type: String,
 }
 
-pub async fn gdrive_auth() -> Result<(), ()> {
+pub async fn gdrive_auth() -> anyhow::Result<()> {
     let contents = std::fs::read_to_string("src/credentials.json").expect("couldn't read the file");
 
     let credentials: CredentialsFile = from_str(&contents).expect("Invalid Credentials");
@@ -57,9 +56,14 @@ pub async fn gdrive_auth() -> Result<(), ()> {
 
     println!("Authorization code received!");
 
-    let tokens = exchange_code(&code, &credentials).await.expect("token exchange failed!");
-    
-    println!("Google authentication successful!");
+    let tokens = exchange_code(&code, &credentials)
+        .await
+        .expect("token exchange failed!");
+
+    let access_token = get_google_access_token(&credentials).await?;
+
+    println!("Successfully obtained a fresh access token!");
+    println!("Access token length: {}", access_token.len());
     Ok(())
 }
 
@@ -117,30 +121,69 @@ async fn wait_for_callback() -> anyhow::Result<String> {
     Ok(code)
 }
 
-async fn exchange_code(
-    code: &str,
-    credentials: &CredentialsFile,
-) -> anyhow::Result<TokenResponse> {
+async fn exchange_code(code: &str, credentials: &CredentialsFile) -> anyhow::Result<TokenResponse> {
     let client = reqwest::Client::new();
 
     let params = [
         ("code", code),
         ("client_id", credentials.installed.client_id.as_str()),
-        ("client_secret", credentials.installed.client_secret.as_str()),
+        (
+            "client_secret",
+            credentials.installed.client_secret.as_str(),
+        ),
         ("redirect_uri", REDIRECT_URI),
         ("grant_type", "authorization_code"),
     ];
 
     let response = client
         .post(&credentials.installed.token_uri)
-        .json(&params)
+        .form(&params)
         .send()
         .await?;
 
-    let tokens = response
-        .error_for_status()?
-        .json::<TokenResponse>()
-        .await?;
+    let tokens = response.error_for_status()?.json::<TokenResponse>().await?;
 
     Ok(tokens)
+}
+
+async fn refresh_access_token(
+    refresh_token: &str,
+    credentials: &CredentialsFile,
+) -> anyhow::Result<TokenResponse> {
+    let client = reqwest::Client::new();
+
+    let params = [
+        ("client_id", credentials.installed.client_id.as_str()),
+        ("client_secret", credentials.installed.client_id.as_str()),
+        ("refresh_token", refresh_token),
+        ("grant_type", "refresh_token"),
+    ];
+
+    let response = client
+        .post(&credentials.installed.token_uri)
+        .form(&params)
+        .send()
+        .await?;
+
+    let status = response.status();
+    let body = response.text().await?;
+
+    println!("Refresh status: {status}");
+    println!("Refresh response: {body}");
+
+    if !status.is_success() {
+        anyhow::bail!("Failed to refresh access token");
+    }
+
+    let tokens: TokenResponse = serde_json::from_str(&body)?;
+
+    Ok(tokens)
+}
+
+async fn get_google_access_token(credentials: &CredentialsFile) -> anyhow::Result<String> {
+    let refresh_token = crate::auth::token_store::get_google_refresh_token()?;
+
+    let tokens = refresh_access_token(&refresh_token, credentials).await?;
+
+    Ok(tokens.access_token)
 }
