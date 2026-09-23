@@ -2,11 +2,12 @@ use anyhow::Ok;
 use clap::Subcommand;
 use dialoguer::{Select, theme::ColorfulTheme};
 
-use crate::{Cli, auth::dropbox_auth, auth::gdrive_auth};
+use crate::{Cli, auth::{dropbox_auth, gdrive_auth}, providers};
 
 #[derive(Subcommand)]
 pub enum Commands {
     Config,
+    Upload { path: String },
 }
 
 enum ConfigActions {
@@ -18,7 +19,7 @@ enum ConfigActions {
 pub async fn config(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
         Commands::Config => {
-            let config_selector = vec!["Connect GDrive","Connect DropBox", "Exit"];
+            let config_selector = vec!["Connect GDrive", "Connect DropBox", "Exit"];
             let selection = Select::with_theme(&ColorfulTheme::default())
                 .with_prompt("What action you want to perform ?")
                 .default(0)
@@ -43,6 +44,19 @@ pub async fn config(cli: Cli) -> anyhow::Result<()> {
                     println!("NeverMind!")
                 }
             }
+        }
+
+        Commands::Upload { path } => {
+            println!("Uploading: {path}");
+        
+            let file = providers::upload_file(
+                std::path::Path::new(&path)
+            )
+            .await?;
+        
+            println!("Uploaded successfully!");
+            println!("Name: {}", file.name);
+            println!("ID: {}", file.id);
         }
     }
 

@@ -33,9 +33,9 @@ struct TokenResponse {
 }
 
 pub async fn gdrive_auth() -> anyhow::Result<()> {
-    let contents = std::fs::read_to_string("src/credentials.json").expect("couldn't read the file");
+    let contents = std::fs::read_to_string("src/credentials.json")?;
 
-    let credentials: CredentialsFile = from_str(&contents).expect("Invalid Credentials");
+    let credentials: CredentialsFile = from_str(&contents)?;
 
     println!("Starting gdrive authentication");
 
@@ -50,20 +50,19 @@ pub async fn gdrive_auth() -> anyhow::Result<()> {
         auth_url
     );
 
-    let code = wait_for_callback()
-        .await
-        .expect("failed to get the callback");
+    let code = wait_for_callback().await?;
 
     println!("Authorization code received!");
 
-    let tokens = exchange_code(&code, &credentials)
-        .await
-        .expect("token exchange failed!");
+    let tokens = exchange_code(&code, &credentials).await?;
 
-    let access_token = get_google_access_token(&credentials).await?;
+    if let Some(refresh_token) = &tokens.refresh_token {
+        crate::auth::token_store::save_google_refresh_token(refresh_token)?;
+    } else {
+        anyhow::bail!("Google did not return a refresh token");
+    }
 
-    println!("Successfully obtained a fresh access token!");
-    println!("Access token length: {}", access_token.len());
+    println!("Google Auth is Successfull!");
     Ok(())
 }
 
@@ -154,7 +153,10 @@ async fn refresh_access_token(
 
     let params = [
         ("client_id", credentials.installed.client_id.as_str()),
-        ("client_secret", credentials.installed.client_id.as_str()),
+        (
+            "client_secret",
+            credentials.installed.client_secret.as_str(),
+        ),
         ("refresh_token", refresh_token),
         ("grant_type", "refresh_token"),
     ];
@@ -168,9 +170,6 @@ async fn refresh_access_token(
     let status = response.status();
     let body = response.text().await?;
 
-    println!("Refresh status: {status}");
-    println!("Refresh response: {body}");
-
     if !status.is_success() {
         anyhow::bail!("Failed to refresh access token");
     }
@@ -180,10 +179,14 @@ async fn refresh_access_token(
     Ok(tokens)
 }
 
-async fn get_google_access_token(credentials: &CredentialsFile) -> anyhow::Result<String> {
+pub async fn get_google_access_token() -> anyhow::Result<String> {
+    let contents = std::fs::read_to_string("src/credentials.json")?;
+
+    let credentials: CredentialsFile = serde_json::from_str(&contents)?;
+
     let refresh_token = crate::auth::token_store::get_google_refresh_token()?;
 
-    let tokens = refresh_access_token(&refresh_token, credentials).await?;
+    let tokens = refresh_access_token(&refresh_token, &credentials).await?;
 
     Ok(tokens.access_token)
 }
